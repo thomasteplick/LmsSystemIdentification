@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="eng">
+	<head>
+		<title>"LMS System Identifier"</title>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<style type="text/css">
+			.options label {
+				font-size: 12px;
+				font-family: Arial, Helvetica, sans-serif;
+				width: 200px;
+				text-align: right;
+			}
+			
+			form, p{
+				width: 800px;
+			}
+
+			nav li{
+				display:inline;
+				margin: 20px;
+			}
+
+			input[type="number"] {
+				width: 50px;
+			}
+
+			.options input[type="text"] {
+				width: 50px;
+			}
+
+			td.align-right {
+				text-align: right;
+			}
+
+			td.pole, td.zero, th {
+				border: solid black 1px;
+				padding:0px;
+				text-align: center;
+				width: 100px;
+			}
+
+			table.pole-zero {
+				border: solid black 2px;
+				width: 400px;
+				border-collapse: collapse;
+			}
+
+			.pole input, .zero input {
+				width: 100px;
+			}
+
+		</style>
+	</head>
+	<body>
+		<h2>Least-Mean-Square System Identifier</h3>
+		<nav>
+			<ul>
+				<li class="links"><a href="http://127.0.0.1:8080/plotresponse">Plot Response</a></li>
+			</ul>
+		</nav>
+		<p> Enter samples, sample rate, SNR, trials, gain constant, signal frequency, 
+			poles (radius, angle), zeroes angle, and order.  
+			The Least-Mean-Square algorithm will be used to create the adaptive filter.  The filter
+		    weights will be averaged over trials, each trial consisting of iterations.  The white Gaussian 
+			noise variance will be calculated from the SNR.  The adaptive filter is saved to disk and
+			its impulse or frequency response can be displayed. The links allow you to plot the impulse
+			or frequency response.
+		</p>
+		<div id="form">
+			<form action="http://127.0.0.1:8080/lmssystemidentifier" method="post">
+				<fieldset>
+					<legend>LMS System Identifier Options</legend>
+					<div class="options">
+						<table>
+							<tr>
+								<td class="align-right">
+									<label for="samples">Samples:</label>
+								</td>
+								<td>
+									<input type="number" id="samples" name="samples" min="3000" max="16000" required/>
+								</td>
+								<td class="align-right">
+									<label for="samplerate">Sample Rate:</label>
+								</td>
+								<td>
+									<input type="number" id="samplerate" name="samplerate" min="1" required />
+								</td>
+								<td class="align-right">
+									<label for="gain">Gain:</label>
+								</td>
+								<td>
+									<input type="text" id="gain" name="gain" required default="1" />
+								</td>
+							</tr>
+							<tr>
+								<td class="align-right">
+									<label for="trials">Trials:</label>
+								</td>
+								<td>
+									<input type="number" id="trials" name="trials" min="1" max="200" required />
+								</td>
+								<td class="align-right">
+									<label for="filtorder">Adaptive Filter Order:</label>
+								</td>
+								<td>
+									<input type="number" id="filtorder" name="filtorder" min="2" max="80" required />
+								</td>
+								<td class="align-right">
+									<label for="snr">SNR:</label>
+								</td>
+								<td>
+									<input type="number" id="snr" name="snr" required />
+								</td>
+							</tr>
+						</table>
+						<p>
+								Select complex zero and pole locations at r*cos(ang) +/- j r*sin(ang),
+								where |r| &lt; 1, 0 &lt; ang &lt; 180.  Zeros are at radius 1:
+						</p>
+						<table class="pole-zero">
+							<tr>
+								<th>#</th>
+								<th>Pole Radius</th>
+								<th>Pole Angle</th>
+								<th>Zero Angle</th>
+							</tr>
+							<tr>
+								<th>1</th>
+								<td class="pole">
+									<input type="number" id="polerad1" name="polerad1" min=".01" max=".99" step=".01" required />
+								</td>
+								<td class="pole">
+									<input type="number" id="poleang1" name="poleang1" min="0" max="180" required />
+								</td>
+								<td class="zero">
+									<input type="number" id="zeroang1" name="zeroang1" min="0" max="180" required />
+								</td>
+							</tr>
+							<tr>
+								<th>2</th>
+								<td class="pole">
+									<input type="number" id="polerad2" name="polerad2" min=".01" max=".99" step=".01" />
+								</td>
+								<td class="pole">
+									<input type="number" id="poleang2" name="poleang2" min="0" max="180" />
+								</td>
+								<td class="zero">
+									<input type="number" id="zeroang2" name="zeroang2" min="0" max="180" />
+								</td>
+							</tr>
+							<tr>
+								<th>3</th>
+								<td class="pole">
+									<input type="number" id="polerad3" name="polerad3" min=".01" max=".99" step=".01" />
+								</td>
+								<td class="pole">
+									<input type="number" id="poleang3" name="poleang3" min="0" max="180" />
+								</td>
+								<td class="zero">
+									<input type="number" id="zeroang3" name="zeroang3" min="0" max="180" />
+								</td>
+							</tr>
+							<tr>
+								<th>4</th>
+								<td class="pole">
+									<input type="number" id="polerad4" name="polerad4" min=".01" max=".99" step=".01" />
+								</td>
+								<td class="pole">
+									<input type="number" id="poleang4" name="poleang4" min="0" max="180" />
+								</td>
+								<td class="zero">
+									<input type="number" id="zeroang4" name="zeroang4" min="0" max="180" />
+								</td>
+							</tr>
+							<tr>
+								<th>5</th>
+								<td class="pole">
+									<input type="number" id="polerad5" name="polerad5" min=".01" max=".99" step=".01" />
+								</td>
+								<td class="pole">
+									<input type="number" id="poleang5" name="poleang5" min="0" max="180" />
+								</td>
+								<td class="zero">
+									<input type="number" id="zeroang5" name="zeroang5" min="0" max="180" />
+								</td>
+							</tr>
+						</table>
+					</div>
+					<input type="submit" value="Submit" />
+					<input type="text" size="50" name="status" value="{{.Status}}" readonly />
+				</fieldset>
+			</form>
+		</div>
+	</body>
+</html>
