@@ -52,6 +52,7 @@ const (
 	signal                     = "signal.txt"                         // signal to plot
 	lmsSystemIdentifierFile    = "lmssystemidentifier.txt"            // LMS adaptive filter for System Identification
 	plantModelFile             = "plantmodel.txt"                     // plant difference equation coefficients
+	plantImpulseResponseFile   = "plantImpulseResponse.txt"           // plant Impulse Response
 	twoPi                      = 2.0 * math.Pi                        // Two PI ~ 6.28
 )
 
@@ -154,50 +155,28 @@ func init() {
 	lmsSystemIdentifierTmpl = template.Must(template.ParseFiles(tmplLmsSystemIdentifier))
 }
 
-// findEndpoints finds the minimum and maximum data values
-func (ep *Endpoints) findEndpoints(input *bufio.Scanner) {
+// findEndpointsMA finds the minimum and maximum data values
+func (ep *Endpoints) findEndpointsMA(input *bufio.Scanner) {
 	ep.xmax = -math.MaxFloat64
 	ep.xmin = math.MaxFloat64
 	ep.ymax = -math.MaxFloat64
 	ep.ymin = math.MaxFloat64
-	var (
-		n      int = 0
-		values []string
-	)
+
+	n := 0
+
 	for input.Scan() {
+		// Each line has 1 value
 		line := input.Text()
-		// Each line has 1 or 2 space-separated values, depending on if it is MA or ARMA:
-		values = strings.Split(line, " ")
 		var (
-			x, y float64
-			err  error
+			y   float64
+			err error
 		)
 		// MA impulse response plot
-		if len(values) == 1 {
-			if y, err = strconv.ParseFloat(values[0], 64); err != nil {
-				fmt.Printf("String %s conversion to float error: %v\n", values[0], err)
-				continue
-			}
-			// ARMA impulse response plot
-		} else if len(values) == 2 {
-			if x, err = strconv.ParseFloat(values[0], 64); err != nil {
-				fmt.Printf("String %s conversion to float error: %v\n", values[0], err)
-				continue
-			}
-
-			if y, err = strconv.ParseFloat(values[1], 64); err != nil {
-				fmt.Printf("String %s conversion to float error: %v\n", values[1], err)
-				continue
-			}
+		if y, err = strconv.ParseFloat(line, 64); err != nil {
+			fmt.Printf("String %s conversion to float error: %v\n", line, err)
+			continue
 		}
 		n++
-
-		if x > ep.xmax {
-			ep.xmax = x
-		}
-		if x < ep.xmin {
-			ep.xmin = x
-		}
 
 		if y > ep.ymax {
 			ep.ymax = y
@@ -206,10 +185,119 @@ func (ep *Endpoints) findEndpoints(input *bufio.Scanner) {
 			ep.ymin = y
 		}
 	}
-	// impulse response plot
+	// impulse response plot using sample number for the x-axis
 	ep.xmin = 0.0
 	ep.xmax = float64(n - 1)
+}
 
+// findEndpointsARMA finds the minimum and maximum data values
+func (ep *Endpoints) findEndpointsARMA(input *bufio.Scanner) {
+	ep.xmax = -math.MaxFloat64
+	ep.xmin = math.MaxFloat64
+	ep.ymax = -math.MaxFloat64
+	ep.ymin = math.MaxFloat64
+
+	var (
+		err  error
+		temp float64
+	)
+	a := make([]float64, 0)
+	b := make([]float64, 0)
+
+	// Save the impulse response
+	impulsefile, err := os.Create(path.Join(dataDir, plantImpulseResponseFile))
+	if err != nil {
+		fmt.Printf("Create %s error: %v", plantImpulseResponseFile, err)
+		return
+	}
+	defer impulsefile.Close()
+
+	// Retrieve the plant model
+	for input.Scan() {
+		// Each line has 2 values
+		line := input.Text()
+		values := strings.Split(line, " ")
+		// ARMA impulse response plot
+		if temp, err = strconv.ParseFloat(values[0], 64); err != nil {
+			fmt.Printf("String %s conversion to float error: %v\n", values[0], err)
+			continue
+		}
+		b = append(b, temp)
+		if temp, err = strconv.ParseFloat(values[1], 64); err != nil {
+			fmt.Printf("String %s conversion to float error: %v\n", values[1], err)
+			continue
+		}
+		a = append(a, temp)
+	}
+	ncoeff := len(a)
+
+	x := make([]float64, ncoeff)
+	y := make([]float64, ncoeff)
+
+	for i := 0; i < ncoeff; i++ {
+		temp = 0.0
+		x[i] = 1
+		k := (i - 1) % ncoeff
+		if k < 0 {
+			k = ncoeff + k
+		}
+		x[k] = 0
+		for j := 0; j < ncoeff; j++ {
+			k = (i - j) % ncoeff
+			if k < 0 {
+				k = ncoeff + k
+			}
+			temp += b[j] * x[k]
+		}
+		for j := 1; j < ncoeff; j++ {
+			k = (i - j) % ncoeff
+			if k < 0 {
+				k = ncoeff + k
+			}
+			temp -= a[j] * y[k]
+		}
+		y[i] = temp
+
+		// Save to plantImpulseResponseFile
+		fmt.Fprintf(impulsefile, "%f\n", y[i])
+
+		if temp > ep.ymax {
+			ep.ymax = temp
+		}
+		if temp < ep.ymin {
+			ep.ymin = temp
+		}
+	}
+
+	i := 0
+	const its int = 100
+	for n := 0; n < its; n++ {
+		temp = 0.0
+		for j := 1; j < ncoeff; j++ {
+			k := (i - j) % ncoeff
+			if k < 0 {
+				k = ncoeff + k
+			}
+			temp -= a[j] * y[k]
+		}
+		y[i] = temp
+
+		// Save to plantImpulseResponseFile
+		fmt.Fprintf(impulsefile, "%f\n", y[i])
+
+		i = (i + 1) % ncoeff
+
+		if temp > ep.ymax {
+			ep.ymax = temp
+		}
+		if temp < ep.ymin {
+			ep.ymin = temp
+		}
+	}
+
+	// impulse response plot using sample number as the x-axis
+	ep.xmin = 0.0
+	ep.xmax = float64(ncoeff + its - 1)
 }
 
 // gridFill inserts the data points in the grid
@@ -217,54 +305,15 @@ func gridFill(plot *PlotT, xscale float64, yscale float64, endpoints Endpoints, 
 	var x float64 = -1
 	for input.Scan() {
 		line := input.Text()
-		// Each line has 1, 2 or 3 space-separated values, depending on if it is real or complex data:
-		// real
-		// time real
-		// time real imaginary
-		values := strings.Split(line, " ")
+		// Each line has 1 value
 		var (
-			y, t float64
-			err  error
+			y   float64
+			err error
 		)
-		// real data, no time
-		if len(values) == 1 {
-			x++
-			if y, err = strconv.ParseFloat(values[0], 64); err != nil {
-				fmt.Printf("String %s conversion to float error: %v\n", values[0], err)
-				return err
-			}
-			// real data
-		} else if len(values) == 2 {
-			if x, err = strconv.ParseFloat(values[0], 64); err != nil {
-				fmt.Printf("String %s conversion to float error: %v\n", values[0], err)
-				return err
-			}
-
-			if y, err = strconv.ParseFloat(values[1], 64); err != nil {
-				fmt.Printf("String %s conversion to float error: %v\n", values[1], err)
-				return err
-			}
-			// complex data
-		} else if len(values) == 3 {
-			if t, err = strconv.ParseFloat(values[0], 64); err != nil {
-				fmt.Printf("String %s conversion to float error: %v\n", values[0], err)
-				return err
-			}
-
-			if x, err = strconv.ParseFloat(values[1], 64); err != nil {
-				fmt.Printf("String %s conversion to float error: %v\n", values[1], err)
-				return err
-			}
-
-			if y, err = strconv.ParseFloat(values[2], 64); err != nil {
-				fmt.Printf("String %s conversion to float error: %v\n", values[2], err)
-				return err
-			}
-
-			// Calculate the modulus of the complex data becomes the y-axis
-			// The time becomes the x-axis
-			y = math.Sqrt(x*x + y*y)
-			x = t
+		x++
+		if y, err = strconv.ParseFloat(line, 64); err != nil {
+			fmt.Printf("String %s conversion to float error: %v\n", line, err)
+			return err
 		}
 
 		// Check if inside the zoom values
@@ -284,7 +333,7 @@ func gridFill(plot *PlotT, xscale float64, yscale float64, endpoints Endpoints, 
 func gridFillInterp(plot *PlotT, xscale float64, yscale float64, endpoints Endpoints, input *bufio.Scanner) error {
 
 	var (
-		x, y, t      float64
+		x, y         float64
 		prevX, prevY float64
 		prevSet      bool = true
 		err          error
@@ -296,50 +345,11 @@ func gridFillInterp(plot *PlotT, xscale float64, yscale float64, endpoints Endpo
 	// Get first sample
 	input.Scan()
 	line := input.Text()
-	// Each line has 1, 2 or 3 space-separated values, depending on if it is real or complex data:
-	// real
-	// time real
-	// time real imaginary
-	values := strings.Split(line, " ")
-	// real data, no time
-	if len(values) == 1 {
-		x = 0
-		if y, err = strconv.ParseFloat(values[0], 64); err != nil {
-			fmt.Printf("String %s conversion to float error: %v\n", values[0], err)
-			return err
-		}
-		// real data
-	} else if len(values) == 2 {
-		if x, err = strconv.ParseFloat(values[0], 64); err != nil {
-			fmt.Printf("String %s conversion to float error: %v\n", values[0], err)
-			return err
-		}
-
-		if y, err = strconv.ParseFloat(values[1], 64); err != nil {
-			fmt.Printf("String %s conversion to float error: %v\n", values[1], err)
-			return err
-		}
-		// complex data
-	} else if len(values) == 3 {
-		if t, err = strconv.ParseFloat(values[0], 64); err != nil {
-			fmt.Printf("String %s conversion to float error: %v\n", values[0], err)
-			return err
-		}
-
-		if x, err = strconv.ParseFloat(values[1], 64); err != nil {
-			fmt.Printf("String %s conversion to float error: %v\n", values[1], err)
-			return err
-		}
-
-		if y, err = strconv.ParseFloat(values[2], 64); err != nil {
-			fmt.Printf("String %s conversion to float error: %v\n", values[2], err)
-			return err
-		}
-
-		// Calculate the modulus of the complex data becomes the y-axis
-		// The time becomes the x-axis
-		y = math.Sqrt(x*x + y*y)
-		x = t
+	// Each line has 1 values
+	x = 0
+	if y, err = strconv.ParseFloat(line, 64); err != nil {
+		fmt.Printf("String %s conversion to float error: %v\n", line, err)
+		return err
 	}
 
 	// Check if inside the zoom values
@@ -362,50 +372,11 @@ func gridFillInterp(plot *PlotT, xscale float64, yscale float64, endpoints Endpo
 	// Continue with the rest of the points in the file
 	for input.Scan() {
 		line = input.Text()
-		// Each line has 1, 2 or 3 space-separated values, depending on if it is real or complex data:
-		// real
-		// time real
-		// time real imaginary
-		values := strings.Split(line, " ")
-		// real data, no time
-		if len(values) == 1 {
-			x++
-			if y, err = strconv.ParseFloat(values[0], 64); err != nil {
-				fmt.Printf("String %s conversion to float error: %v\n", values[0], err)
-				return err
-			}
-			// real data
-		} else if len(values) == 2 {
-			if x, err = strconv.ParseFloat(values[0], 64); err != nil {
-				fmt.Printf("String %s conversion to float error: %v\n", values[0], err)
-				return err
-			}
-
-			if y, err = strconv.ParseFloat(values[1], 64); err != nil {
-				fmt.Printf("String %s conversion to float error: %v\n", values[1], err)
-				return err
-			}
-			// complex data
-		} else if len(values) == 3 {
-			if t, err = strconv.ParseFloat(values[0], 64); err != nil {
-				fmt.Printf("String %s conversion to float error: %v\n", values[0], err)
-				return err
-			}
-
-			if x, err = strconv.ParseFloat(values[1], 64); err != nil {
-				fmt.Printf("String %s conversion to float error: %v\n", values[1], err)
-				return err
-			}
-
-			if y, err = strconv.ParseFloat(values[2], 64); err != nil {
-				fmt.Printf("String %s conversion to float error: %v\n", values[2], err)
-				return err
-			}
-
-			// Calculate the modulus of the complex data becomes the y-axis
-			// The time becomes the x-axis
-			y = math.Sqrt(x*x + y*y)
-			x = t
+		// Each line has 1 value
+		x++
+		if y, err = strconv.ParseFloat(line, 64); err != nil {
+			fmt.Printf("String %s conversion to float error: %v\n", line, err)
+			return err
 		}
 
 		// Check if inside the zoom values
@@ -469,9 +440,21 @@ func processTimeDomain(w http.ResponseWriter, r *http.Request, filename string) 
 		// grid row/column.
 		input := bufio.NewScanner(f)
 
-		endpoints.findEndpoints(input)
+		// Determine if MA or ARMA, the adaptive filter is MA
+		// the plant model is ARMA
+		if filename == lmsSystemIdentifierFile {
+			endpoints.findEndpointsMA(input)
+		} else if filename == plantModelFile {
+			endpoints.findEndpointsARMA(input)
+		} else {
+			f.Close()
+			return fmt.Errorf("%s is not a MA/ARMA filter coefficient file", filename)
+		}
 
 		f.Close()
+		if filename == plantModelFile {
+			filename = plantImpulseResponseFile
+		}
 		f, err = os.Open(filename)
 		if err == nil {
 			defer f.Close()
@@ -596,6 +579,7 @@ func processFrequencyDomain(w http.ResponseWriter, r *http.Request, filename str
 		xscale        float64                                                    // data to grid in x direction
 		yscale        float64                                                    // data to grid in y direction
 		samplingRate  float64                                                    // sampling rate in Hz
+		ARMA          bool                                                       // ARMA model for the system
 	)
 
 	plot.Grid = make([]string, rows*columns)
@@ -609,25 +593,29 @@ func processFrequencyDomain(w http.ResponseWriter, r *http.Request, filename str
 	window["Hanning"] = hanning
 	window["Rectangle"] = rectangle
 
+	// Need plant model for frequency response, not impulse response
+	if filename == plantImpulseResponseFile {
+		filename = plantModelFile
+	}
+
 	// Open file
 	f, err := os.Open(filename)
 	if err == nil {
 		input := bufio.NewScanner(f)
-		// Number of real or complex data samples
+		// Number of real coefficients
 		for input.Scan() {
 			line := input.Text()
 			if len(line) > 0 {
 				nn++
 			}
 		}
+		f.Close()
 		fmt.Printf("Data file %s has %d samples\n", filename, nn)
 		// make even number of samples so if segments = 1, we won't
 		// do the last FFT with one sample
 		if nn%2 == 1 {
 			nn++
 		}
-
-		f.Close()
 
 		// Get number of segments from HTML form
 		// Number of segments to average the periodograms to reduce the variance
@@ -702,87 +690,55 @@ func processFrequencyDomain(w http.ResponseWriter, r *http.Request, filename str
 		// It is the (sampling frequency)/2, the highest non-aliased frequency
 		PSD = make([]float64, N/2+1)
 
-		// Reopen the data file
+		// Reopen the coefficients file
 		f, err = os.Open(filename)
 		if err == nil {
 			defer f.Close()
-			bufm := make([]complex128, m)
-			bufN := make([]complex128, N)
+			bufm_a := make([]complex128, m) // denominator in ARMA
+			bufm_b := make([]complex128, m) // numerator in ARMA or MA
+			bufN_a := make([]complex128, N) // denominator in ARMA
+			bufN_b := make([]complex128, N) // numerator in ARMA or MA
 			input := bufio.NewScanner(f)
 			// Read in initial m samples into buf[m] to start the processing loop
 			diff := 0.0
-			prev := 0.0
 			for k := 0; k < m; k++ {
 				input.Scan()
 				line := input.Text()
-				// Each line has 1, 2 or 3 space-separated values, depending on if it is real or complex data:
-				// real
-				// time real
-				// time real imaginary
+				// Each line has 1 or 2 space-separated values
 				values := strings.Split(line, " ")
+				// adaptive filter coefficients MA model, FIR filter
 				if len(values) == 1 {
-					var r float64
-					if r, err = strconv.ParseFloat(values[0], 64); err != nil {
+					ARMA = false
+					var b float64
+					if b, err = strconv.ParseFloat(values[0], 64); err != nil {
 						fmt.Printf("String %s conversion to float error: %v\n", values[0], err)
 						continue
 					}
 					if k != 0 {
 						diff += .5
 					}
-					bufm[k] = complex(r, 0)
-					// real data
-				}
-				if len(values) == 2 {
-					// time real, calculate the sampling rate from the time steps
-					var t, r float64
+					bufm_b[k] = complex(b, 0)
+				} else if len(values) == 2 {
+					ARMA = true
+					// plant model a and b coefficients, ARMA model
+					var a, b float64
 
-					if t, err = strconv.ParseFloat(values[0], 64); err != nil {
+					if b, err = strconv.ParseFloat(values[0], 64); err != nil {
 						fmt.Printf("String %s conversion to float error: %v\n", values[0], err)
 						continue
 					}
-					if r, err = strconv.ParseFloat(values[1], 64); err != nil {
+					if a, err = strconv.ParseFloat(values[1], 64); err != nil {
 						fmt.Printf("String %s conversion to float error: %v\n", values[1], err)
 						continue
 					}
 
-					if k == 0 {
-						prev = t
-					} else {
-						diff += t - prev
-						prev = t
+					if k != 0 {
+						diff += .5
 					}
-					bufm[k] = complex(r, 0)
-
-					// complex data
-				} else if len(values) == 3 {
-					// time real imag
-					var t, r, i float64
-
-					// calculate the sampling rate from the time steps
-					if t, err = strconv.ParseFloat(values[0], 64); err != nil {
-						fmt.Printf("String %s conversion to float error: %v\n", values[0], err)
-						continue
-					}
-					if r, err = strconv.ParseFloat(values[1], 64); err != nil {
-						fmt.Printf("String %s conversion to float error: %v\n", values[1], err)
-						continue
-					}
-
-					if i, err = strconv.ParseFloat(values[2], 64); err != nil {
-						fmt.Printf("String %s conversion to float error: %v\n", values[2], err)
-						continue
-					}
-
-					if k == 0 {
-						prev = t
-					} else {
-						diff += t - prev
-						prev = t
-					}
-					bufm[k] = complex(r, i)
+					bufm_a[k] = complex(a, 0)
+					bufm_b[k] = complex(b, 0)
 				}
 			}
-
 			// Average the time steps and invert to get the sampling rate
 			samplingRate = 1.0 / (diff / float64(m-1))
 			fmt.Printf("sampling rate = %.2f\n", samplingRate)
@@ -792,7 +748,10 @@ func processFrequencyDomain(w http.ResponseWriter, r *http.Request, filename str
 			for {
 				// Put the previous m samples in the front of the buffer N to
 				// overlap segments
-				copy(bufN, bufm)
+				if ARMA {
+					copy(bufN_a, bufm_a)
+				}
+				copy(bufN_b, bufm_b)
 				// Put the next m samples in back of the previous m samples
 				kk := 0
 				for k := 0; k < m; k++ {
@@ -801,45 +760,27 @@ func processFrequencyDomain(w http.ResponseWriter, r *http.Request, filename str
 						break
 					}
 					line := input.Text()
-					// Each line has 1 - 3 values: [time], real, [imag]
+					// Each line has 1 - 2 values, depending on MA or ARMA model
 					values := strings.Split(line, " ")
 					if len(values) == 1 {
-						var r float64
-
-						if r, err = strconv.ParseFloat(values[0], 64); err != nil {
+						var b float64
+						if b, err = strconv.ParseFloat(values[0], 64); err != nil {
 							fmt.Printf("String %s conversion to float error: %v\n", values[0], err)
 							continue
 						}
-						// real data, no time or imag
-						bufm[k] = complex(r, 0)
-						// real data
+						bufm_b[k] = complex(b, 0)
 					} else if len(values) == 2 {
-						// time real, but don't need the time
-						var r float64
-
-						if r, err = strconv.ParseFloat(values[1], 64); err != nil {
+						var a, b float64
+						if b, err = strconv.ParseFloat(values[0], 64); err != nil {
+							fmt.Printf("String %s conversion to float error: %v\n", values[0], err)
+							continue
+						}
+						if a, err = strconv.ParseFloat(values[1], 64); err != nil {
 							fmt.Printf("String %s conversion to float error: %v\n", values[1], err)
 							continue
 						}
-						// real data, imaginary component is zero
-						bufm[k] = complex(r, 0)
-
-						// complex data
-					} else if len(values) == 3 {
-						// time real imag
-						var r, i float64
-						// Don't need the time
-						if r, err = strconv.ParseFloat(values[1], 64); err != nil {
-							fmt.Printf("String %s conversion to float error: %v\n", values[1], err)
-							continue
-						}
-
-						if i, err = strconv.ParseFloat(values[2], 64); err != nil {
-							fmt.Printf("String %s conversion to float error: %v\n", values[2], err)
-							continue
-						}
-
-						bufm[k] = complex(r, i)
+						bufm_a[k] = complex(a, 0)
+						bufm_b[k] = complex(b, 0)
 					}
 					kk++
 				}
@@ -852,30 +793,60 @@ func processFrequencyDomain(w http.ResponseWriter, r *http.Request, filename str
 					}
 				}
 				// Put the next kk samples in back of the previous m
-				copy(bufN[m:], bufm[:kk])
+				if ARMA {
+					copy(bufN_a[m:], bufm_a[:kk])
+				}
+				copy(bufN_b[m:], bufm_b[:kk])
 
 				// window the m + kk samples with chosen window
 				for i := 0; i < m+kk; i++ {
-					bufN[i] *= w(i, m)
+					if ARMA {
+						bufN_a[i] *= w(i, m)
+					}
+					bufN_b[i] *= w(i, m)
 				}
 
 				// zero-pad N-m-kk samples in buf[N]
 				for i := m + kk; i < N; i++ {
-					bufN[i] = 0
+					if ARMA {
+						bufN_a[i] = 0
+					}
+					bufN_b[i] = 0
 				}
 
 				// Perform N-point complex FFT and add squares to previous values in PSD[N/2+1]
-				fourierN := fft.FFT(bufN)
-				x := cmplx.Abs(fourierN[0])
-				PSD[0] += x * x
+				var fourierN_a []complex128
+				if ARMA {
+					fourierN_a = fft.FFT(bufN_a)
+				}
+				fourierN_b := fft.FFT(bufN_b)
+
+				fb := cmplx.Abs(fourierN_b[0])
+				if ARMA {
+					fa := cmplx.Abs(fourierN_a[0])
+					PSD[0] += fb * fb / (fa * fa)
+				} else {
+					PSD[0] += fb * fb
+				}
 				for i := 1; i < N/2; i++ {
 					// Use positive and negative frequencies -> bufN[N-i] = bufN[-i]
-					xi := cmplx.Abs(fourierN[i])
-					xNi := cmplx.Abs(fourierN[N-i])
-					PSD[i] += xi*xi + xNi*xNi
+					fb = cmplx.Abs(fourierN_b[i])
+					fbNi := cmplx.Abs((fourierN_b[N-i]))
+					if ARMA {
+						fa := cmplx.Abs(fourierN_a[i])
+						faNi := cmplx.Abs(fourierN_a[N-i])
+						PSD[i] += (fa*fa + faNi*faNi) / (fb*fb + fbNi*fbNi)
+					} else {
+						PSD[i] += fb*fb + fbNi*fbNi
+					}
 				}
-				x = cmplx.Abs(fourierN[N/2])
-				PSD[N/2] += x * x
+				fb = cmplx.Abs(fourierN_b[N/2])
+				if ARMA {
+					fa := cmplx.Abs(fourierN_a[N/2])
+					PSD[N/2] += (fb * fb) / (fa * fa)
+				} else {
+					PSD[N/2] += fb * fb
+				}
 
 				// part of K*Sum(w[i]*w[i]) PSD normalizer
 				normalizerPSD += sumWindow
@@ -1197,56 +1168,18 @@ func (lms *LMSAlgorithm) plant() error {
 // runLms determines the adaptive weights using the LMS algorithm
 func (lms *LMSAlgorithm) runLms() error {
 
-	// Open the plant model file
-	f, err := os.Open(plantModelFile)
-	if err != nil {
-		return fmt.Errorf("Open file %v error: %v", plantModelFile, err)
-	}
-
 	// increment wg
 	lms.wg.Add(1)
 
 	// launch a goroutine to generate the adaptive filter
 	go func() {
-		defer func() {
-			lms.wg.Done()
-			f.Close()
-		}()
-
-		// Retrieve the plant model
-		input := bufio.NewScanner(f)
-		ncoeff := 3 + 2*(len(lms.poleRad)-1)
-		a := make([]float64, ncoeff)
-		b := make([]float64, ncoeff)
-
-		i := 0
-		for input.Scan() {
-			line := input.Text()
-			if len(line) > 0 {
-				values := strings.Split(line, " ")
-				v, err := strconv.ParseFloat(values[0], 64)
-				if err != nil {
-					fmt.Printf("File %f ParseFloat error: %v\n", plantModelFile, err)
-					continue
-				}
-				b[i] = v
-				v, err = strconv.ParseFloat(values[1], 64)
-				if err != nil {
-					fmt.Printf("File %f ParseFloat error: %v\n", plantModelFile, err)
-					continue
-				}
-				a[i] = v
-				i++
-			}
-		}
+		defer lms.wg.Done()
 
 		L := lms.order + 1
 		// holds the previous inputs
-		x := make([]float64, ncoeff)
-		// holds the previous outputs
-		y := make([]float64, ncoeff)
+		x := make([]float64, L)
 
-		i = 0
+		i := 0
 		// range over the channel containing the plant output
 		for d := range lms.fromChan {
 			x[i] = d.in
