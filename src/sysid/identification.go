@@ -448,12 +448,14 @@ func processTimeDomain(w http.ResponseWriter, r *http.Request, filename string) 
 
 		f.Close()
 		if path.Base(filename) == plantModelFile {
-			filename = "data/" + plantImpulseResponseFile
+			filename = path.Join(dataDir, plantImpulseResponseFile)
 		}
+
 		f, err = os.Open(filename)
 		if err == nil {
 			defer f.Close()
 			input := bufio.NewScanner(f)
+			epDelta := .1 // Make it easier to see the max and minimum
 
 			// Determine if zoom requested and validate endpoints
 			zoomxstart := r.FormValue("zoomxstart")
@@ -476,8 +478,8 @@ func processTimeDomain(w http.ResponseWriter, r *http.Request, filename string) 
 						(x2 < endpoints.xmin || x2 > endpoints.xmax) || (x1 >= x2) {
 						plot.Status = "Zoom values are not in x range."
 						fmt.Printf("Zoom error: start or end value not in x range.\n")
-					} else if (y1 < endpoints.ymin || y1 > endpoints.ymax) ||
-						(y2 < endpoints.ymin || y2 > endpoints.ymax) || (y1 >= y2) {
+					} else if (y1 < (endpoints.ymin-epDelta) || y1 > (endpoints.ymax+epDelta)) ||
+						(y2 < (endpoints.ymin-epDelta) || y2 > (endpoints.ymax+epDelta)) || (y1 >= y2) {
 						plot.Status = "Zoom values are not in y range."
 						fmt.Printf("Zoom error: start or end value not in y range.\n")
 						fmt.Printf("y1=%v, y2=%v, endpoints.ymin=%v, endpoints.ymax=%v\n",
@@ -486,8 +488,8 @@ func processTimeDomain(w http.ResponseWriter, r *http.Request, filename string) 
 						// Valid Zoom endpoints, replace the previous min and max values
 						endpoints.xmin = x1
 						endpoints.xmax = x2
-						endpoints.ymin = y1
-						endpoints.ymax = y2
+						endpoints.ymin = y1 - epDelta
+						endpoints.ymax = y2 + epDelta
 					}
 				}
 			}
@@ -542,7 +544,11 @@ func processTimeDomain(w http.ResponseWriter, r *http.Request, filename string) 
 	}
 
 	// Enter the filename in the form
-	plot.Filename = path.Base(filename)
+	if path.Base(filename) == plantImpulseResponseFile {
+		plot.Filename = plantModelFile
+	} else {
+		plot.Filename = path.Base(filename)
+	}
 
 	// Write to HTTP using template and grid
 	if err := timeTmpl.Execute(w, plot); err != nil {
