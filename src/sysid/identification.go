@@ -100,8 +100,8 @@ type LMSAlgorithm struct {
 	fromChan   chan ComChan // synchronized channel to adaptive filter from plant
 	poleRad    []float64    // plant pole radius ->  r*cos(ang) + j r*sin(ang)
 	poleAng    []float64    // plant pole angle in degrees
+	zeroRad    []float64    // plant zero radius
 	zeroAng    []float64    // plant zero angle in degrees
-	snr        int          // signal-to-noise ratio for noisy channel
 }
 
 // biquads are second-order zero-pole sections consisting of a
@@ -234,23 +234,18 @@ func (ep *Endpoints) findEndpointsARMA(input *bufio.Scanner) {
 	x := make([]float64, ncoeff)
 	y := make([]float64, ncoeff)
 
+	x[0] = 1.0
 	for i := 0; i < ncoeff; i++ {
 		temp = 0.0
-		x[i] = 1
-		k := (i - 1) % ncoeff
-		if k < 0 {
-			k = ncoeff + k
-		}
-		x[k] = 0
 		for j := 0; j < ncoeff; j++ {
-			k = (i - j) % ncoeff
+			k := (i - j) % ncoeff
 			if k < 0 {
 				k = ncoeff + k
 			}
 			temp += b[j] * x[k]
 		}
 		for j := 1; j < ncoeff; j++ {
-			k = (i - j) % ncoeff
+			k := (i - j) % ncoeff
 			if k < 0 {
 				k = ncoeff + k
 			}
@@ -270,7 +265,7 @@ func (ep *Endpoints) findEndpointsARMA(input *bufio.Scanner) {
 	}
 
 	i := 0
-	const its int = 100
+	its := max(20-ncoeff, ncoeff)
 	for n := 0; n < its; n++ {
 		temp = 0.0
 		for j := 1; j < ncoeff; j++ {
@@ -442,9 +437,9 @@ func processTimeDomain(w http.ResponseWriter, r *http.Request, filename string) 
 
 		// Determine if MA or ARMA, the adaptive filter is MA
 		// the plant model is ARMA
-		if filename == lmsSystemIdentifierFile {
+		if path.Base(filename) == lmsSystemIdentifierFile {
 			endpoints.findEndpointsMA(input)
-		} else if filename == plantModelFile {
+		} else if path.Base(filename) == plantModelFile {
 			endpoints.findEndpointsARMA(input)
 		} else {
 			f.Close()
@@ -452,8 +447,8 @@ func processTimeDomain(w http.ResponseWriter, r *http.Request, filename string) 
 		}
 
 		f.Close()
-		if filename == plantModelFile {
-			filename = plantImpulseResponseFile
+		if path.Base(filename) == plantModelFile {
+			filename = "data/" + plantImpulseResponseFile
 		}
 		f, err = os.Open(filename)
 		if err == nil {
@@ -835,7 +830,7 @@ func processFrequencyDomain(w http.ResponseWriter, r *http.Request, filename str
 					if ARMA {
 						fa := cmplx.Abs(fourierN_a[i])
 						faNi := cmplx.Abs(fourierN_a[N-i])
-						PSD[i] += (fa*fa + faNi*faNi) / (fb*fb + fbNi*fbNi)
+						PSD[i] += (fb*fb + fbNi*fbNi) / (fa*fa + faNi*faNi)
 					} else {
 						PSD[i] += fb*fb + fbNi*fbNi
 					}
@@ -1047,7 +1042,7 @@ func (lms *LMSAlgorithm) plant() error {
 		// plant difference equation, which is the order + 1
 		ncoeff := 3 + 2*(len(lms.poleRad)-1)
 
-		// Construct the biquads: 1-2*cos(zero-ang)z^(-1)+z^(-2)
+		// Construct the biquads: 1-2*rcos(zero-ang)z^(-1)+r*r*z^(-2)
 		//                        -----------------------------------
 		//                        1-2*r*cos(pole-ang)z^(-1)+r*r*z(-2)
 
@@ -1058,8 +1053,10 @@ func (lms *LMSAlgorithm) plant() error {
 		// loop over the pole/zero pairs and construct the slice of biquads
 		for i := 0; i < nbiquads; i++ {
 			biquad[i] = Biquad{
-				num:   [3]float64{1.0, -2.0 * math.Cos(lms.zeroAng[i]*deg2rad), 1.0},
-				denom: [3]float64{1.0, -2.0 * lms.poleRad[i] * math.Cos(lms.poleAng[i]*deg2rad), lms.poleRad[i] * lms.poleRad[i]},
+				num: [3]float64{1.0, -2.0 * lms.zeroRad[i] * math.Cos(lms.zeroAng[i]*deg2rad),
+					lms.zeroRad[i] * lms.zeroRad[i]},
+				denom: [3]float64{1.0, -2.0 * lms.poleRad[i] * math.Cos(lms.poleAng[i]*deg2rad),
+					lms.poleRad[i] * lms.poleRad[i]},
 			}
 		}
 
@@ -1081,25 +1078,27 @@ func (lms *LMSAlgorithm) plant() error {
 		ncorr := 3 // number of correlations for this iteration in the for loop
 		for i := 1; i < nbiquads; i++ {
 			/***************** numerator ***************************************/
-			num[0] += biquad[i].num[0] * num[0]
-			num[1] += biquad[i].num[1]*num[0] + biquad[i].num[0]*num[1]
+			num[0] = biquad[i].num[0] * num[0]
+			num[1] = biquad[i].num[1]*num[0] + biquad[i].num[0]*num[1]
 			for j := 2; j < ncorr; j++ {
+				num[j] = 0.0
 				for k := 0; k < 3; k++ {
 					num[j] += biquad[i].num[k] * num[j-k]
 				}
 			}
-			num[ncorr] += biquad[i].num[2]*num[ncorr] + biquad[i].num[1]*num[ncorr+1]
-			num[ncorr+1] += biquad[i].num[2] * num[ncorr+1]
+			num[ncorr] = biquad[i].num[2]*num[ncorr-2] + biquad[i].num[1]*num[ncorr-1]
+			num[ncorr+1] = biquad[i].num[2] * num[ncorr-1]
 			/***************** denominator ***************************************/
-			denom[0] += biquad[i].denom[0] * denom[0]
-			denom[1] += biquad[i].denom[1]*denom[0] + biquad[i].denom[0]*denom[1]
+			denom[0] = biquad[i].denom[0] * denom[0]
+			denom[1] = biquad[i].denom[1]*denom[0] + biquad[i].denom[0]*denom[1]
 			for j := 2; j < ncorr; j++ {
+				denom[j] = 0.0
 				for k := 0; k < 3; k++ {
 					denom[j] += biquad[i].denom[k] * denom[j-k]
 				}
 			}
-			denom[ncorr] += biquad[i].denom[2]*denom[ncorr] + biquad[i].denom[1]*denom[ncorr+1]
-			denom[ncorr+1] += biquad[i].denom[2] * denom[ncorr+1]
+			denom[ncorr] = biquad[i].denom[2]*denom[ncorr-2] + biquad[i].denom[1]*denom[ncorr-1]
+			denom[ncorr+1] = biquad[i].denom[2] * denom[ncorr-1]
 
 			ncorr += 2
 		}
@@ -1248,32 +1247,9 @@ func handleLmsSystemIdentifier(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		txt := r.FormValue("signalfreq")
-		sigfreq, err := strconv.Atoi(txt)
-		if err != nil {
-			fmt.Printf("Signal frequency conversion error: %v\n", err)
-			plot.Status = fmt.Sprintf("Signal frequency conversion to int error: %v", err.Error())
-			// Write to HTTP using template and grid
-			if err := lmsSystemIdentifierTmpl.Execute(w, plot); err != nil {
-				log.Fatalf("Write to HTTP output using template with error: %v\n", err)
-			}
-			return
-		}
-
-		// Verify signal frequency is less than Nyquist frequency = sample rate / 2
-		if sigfreq > samplerate/2 {
-			fmt.Printf("Signal frequency %v is greater than Nyquist frequency %v\n", sigfreq, samplerate/2)
-			plot.Status = fmt.Sprintf("Signal frequency %v is greater than Nyquist frequency %v\n", sigfreq, samplerate/2)
-			// Write to HTTP using template and grid
-			if err := lmsSystemIdentifierTmpl.Execute(w, plot); err != nil {
-				log.Fatalf("Write to HTTP output using template with error: %v\n", err)
-			}
-			return
-		}
-
 		// adaptive filter order is the number of past samples
 		// filter length = order + 1
-		txt = r.FormValue("filtorder")
+		txt := r.FormValue("filtorder")
 		order, err := strconv.Atoi(txt)
 		if err != nil {
 			plot.Status = fmt.Sprintf("Filter order conversion to int error: %v", err.Error())
@@ -1315,22 +1291,11 @@ func handleLmsSystemIdentifier(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		txt = r.FormValue("snr")
-		snr, err := strconv.Atoi(txt)
-		if err != nil {
-			plot.Status = fmt.Sprintf("SNR conversion to int error: %v", err.Error())
-			fmt.Printf("SNR conversion to int error: %v\n", err.Error())
-			// Write to HTTP using template and grid
-			if err := lmsSystemIdentifierTmpl.Execute(w, plot); err != nil {
-				log.Fatalf("Write to HTTP output using template with error: %v\n", err)
-			}
-			return
-		}
-
 		// Store the pole and zero data
 		p := 1
 		pr := make([]float64, 0)
 		pa := make([]float64, 0)
+		zr := make([]float64, 0)
 		za := make([]float64, 0)
 		for {
 			txt = r.FormValue("polerad" + strconv.Itoa(p))
@@ -1386,6 +1351,32 @@ func handleLmsSystemIdentifier(w http.ResponseWriter, r *http.Request) {
 			}
 			pa = append(pa, poleAng)
 
+			txt = r.FormValue("zerorad" + strconv.Itoa(p))
+			if len(txt) == 0 {
+				break
+			}
+			zeroRad, err := strconv.ParseFloat(txt, 64)
+			if err != nil {
+				plot.Status = fmt.Sprintf("Zero radius conversion to float64 error: %v", err.Error())
+				fmt.Printf("Zero radius conversion to float64 error: %v\n", err.Error())
+				// Write to HTTP using template and grid
+				if err := lmsSystemIdentifierTmpl.Execute(w, plot); err != nil {
+					log.Fatalf("Write to HTTP output using template with error: %v\n", err)
+				}
+				return
+			}
+			// Verify zero radius
+			if zeroRad < .01 || zeroRad > .99 {
+				plot.Status = fmt.Sprintf("Zero radius [%v] not between .01 and .99.\n", zeroRad)
+				fmt.Printf("Zero radius [%v] not between .01 and .99.\n", zeroRad)
+				// Write to HTTP using template and grid
+				if err := lmsSystemIdentifierTmpl.Execute(w, plot); err != nil {
+					log.Fatalf("Write to HTTP output using template with error: %v\n", err)
+				}
+				return
+			}
+			zr = append(zr, zeroRad)
+
 			txt = r.FormValue("zeroang" + strconv.Itoa(p))
 			if len(txt) == 0 {
 				break
@@ -1414,7 +1405,7 @@ func handleLmsSystemIdentifier(w http.ResponseWriter, r *http.Request) {
 			p++
 		}
 
-		if len(pr) == 0 || len(pa) == 0 || len(za) == 0 {
+		if len(pr) == 0 || len(pa) == 0 || len(za) == 0 || len(zr) == 0 {
 			plot.Status = "Must have at least one pole and zero"
 			fmt.Println("Must have at least one pole and zero")
 			// Write to HTTP using template and grid
@@ -1423,9 +1414,10 @@ func handleLmsSystemIdentifier(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		if (len(pr) != len(pa)) || (len(pr) != len(za)) || (len(pa) != len(za)) {
-			plot.Status = "Must have the same number of pole radii, pole angles, and zero angles"
-			fmt.Println("Must have the same number of pole radii, pole angles, an zero angles")
+		if (len(pr) != len(pa)) || (len(pr) != len(za)) ||
+			len(pr) != len(zr) || (len(pa) != len(za)) || len(pa) != len(zr) {
+			plot.Status = "Must have the same number of pole and zero radii, pole and zero angles"
+			fmt.Println("Must have the same number of pole and zero radii, pole and zero angles.")
 			// Write to HTTP using template and grid
 			if err := lmsSystemIdentifierTmpl.Execute(w, plot); err != nil {
 				log.Fatalf("Write to HTTP output using template with error: %v\n", err)
@@ -1442,9 +1434,9 @@ func handleLmsSystemIdentifier(w http.ResponseWriter, r *http.Request) {
 			samplerate: samplerate,
 			wEnsemble:  make([]float64, order+1),
 			wTrial:     make([]float64, order+1),
-			snr:        snr,
 			poleRad:    pr,
 			poleAng:    pa,
+			zeroRad:    zr,
 			zeroAng:    za,
 		}
 
