@@ -50,6 +50,29 @@ After the adaptive filter is produced, the impulse or frequency response of the 
 
 ![frequencyResponseAdaptiveFilter](https://github.com/thomasteplick/LmsSystemIdentification/assets/117768679/b236226b-5272-4c0c-950e-6ee303b00d0a)
 
+<h4>LMS System Identifier Options, Highpass, Order 80 Adaptive Filter</h4>
+
+![LmsSystemIdentifierOptions](https://github.com/thomasteplick/LmsSystemIdentification/assets/117768679/3b67b487-c183-44f1-be89-9cfe387d44f9)
+
+<h4>Plant Impulse Response</h4>
+
+![impulseResponsePlant](https://github.com/thomasteplick/LmsSystemIdentification/assets/117768679/5100566b-fd7c-4f2e-b082-5816b3d6d62c)
+
+<h4>Plant Frequency Response</h4>
+
+![frequencyResponsePlant](https://github.com/thomasteplick/LmsSystemIdentification/assets/117768679/790d48ec-dc35-40c2-a8e4-34c5da4ba7f7)
+
+<h4>Adaptive Filter Impulse Response, Order 80</h4>
+
+![impulseResponseAdaptiveFilter](https://github.com/thomasteplick/LmsSystemIdentification/assets/117768679/0670fde8-2eb1-40f6-bb71-6f3040993de9)
+
+<h4>Adaptive Filter Frequency Response, Order 80</h4>
+
+![frequencyResponseAdaptiveFilter](https://github.com/thomasteplick/LmsSystemIdentification/assets/117768679/db9881e5-46a6-4522-836e-3cd56d2f9b2d)
+
+
+
+
 
 
 
