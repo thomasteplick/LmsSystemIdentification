@@ -9,3 +9,27 @@ The poles and zeros are converted into quadratic pole/zero stages, or <i>biquads
 <p>
 After the adaptive filter is produced, the impulse or frequency response of the plant or adaptive filter can be plotted.  The link <i>Plot Response</i> will take you to the page where you can choose the impulse (time domain) or frequency response.  For the frequency response, the FFT size, number of segments, and window can be chosen.  For this program, one segment with a rectangular window and an FFT size of 8192 is sufficient.
 </p>
+
+<h4>LMS System Identifier Options, Bandpass, Order 80 Adaptive Filter</h4>
+
+![LmsSystemIdentifierOptions](https://github.com/thomasteplick/LmsSystemIdentification/assets/117768679/5140f3ab-92d0-493d-9ef3-a28691ffc149)
+
+<h4>Plant Impulse Response</h4>
+
+![impulseResponsePlant](https://github.com/thomasteplick/LmsSystemIdentification/assets/117768679/5043f982-5921-4926-973e-cbb4f43b10a2)
+
+<h4>Plant Frequency Response</h4>
+
+![freqResponsePlant](https://github.com/thomasteplick/LmsSystemIdentification/assets/117768679/2bff1f93-1131-4186-8479-5fb29da155b5)
+
+<h4>Adaptive Filter Impulse Response, Order 80</h4>
+
+![impulseResponseAdaptiveFilt](https://github.com/thomasteplick/LmsSystemIdentification/assets/117768679/91abf45e-519b-4ca1-a1b8-899fdbbfa491)
+
+<h4>Adaptive Filter Frequency Response, Order 80</h4>
+
+![freqResponseAdaptiveFilt](https://github.com/thomasteplick/LmsSystemIdentification/assets/117768679/a05a8ce0-39ba-48a4-835f-2d6229431629)
+
+
+
+
